@@ -94,6 +94,9 @@ public void OnClientDisconnect_Post(int client)
 	g_PlayerReady[client] = false;
 }
 
+/**
+ * Command to setup the pug.
+ */
 Action Command_Setup(int client, int args)
 {
 	if (args < 0)
@@ -137,6 +140,9 @@ Action Command_Setup(int client, int args)
 	}
 }
 
+/**
+ * Command to set the game mode.
+ */
 Action Command_Mode(int client, int args)
 {
 	if (args < 1)
@@ -183,6 +189,9 @@ Action Command_Mode(int client, int args)
 	}
 }
 
+/**
+ * Command to set the medic decision mode.
+ */
 Action Command_MedicMode(int client, int args)
 {
 	if (args < 1)
@@ -227,6 +236,9 @@ Action Command_MedicMode(int client, int args)
 	}
 }
 
+/**
+ * Command for a player to ready themselves.
+ */
 Action Command_Ready(int client, int args)
 {
 	if (g_GameState != GameState_WaitingForPlayers)
@@ -256,6 +268,9 @@ Action Command_Ready(int client, int args)
 	return Plugin_Handled;
 }
 
+/**
+ * Command for a player to unready themselves.
+ */
 Action Command_Unready(int client, int args)
 {
 	if (g_GameState != GameState_WaitingForPlayers)
@@ -285,6 +300,9 @@ Action Command_Unready(int client, int args)
 	return Plugin_Handled;
 }
 
+/**
+ * Add a client command.
+ */
 void AddCommand(const char[] command, ConCmd callback, const char[] description)
 {
 	char smCommandBuffer[64];
@@ -292,6 +310,9 @@ void AddCommand(const char[] command, ConCmd callback, const char[] description)
 	RegConsoleCmd(smCommandBuffer, callback, description);
 }
 
+/**
+ * Repeated timer to check if the pug is ready to be started.
+ */
 Action Timer_CheckPugReady(Handle timer)
 {
 	g_PlayersReady = 0;
@@ -325,6 +346,10 @@ Action Timer_CheckPugReady(Handle timer)
 	return Plugin_Continue;
 }
 
+/**
+ * Repeated timer to draw the player list on everybody's screen
+ * to show the ready status of players.
+ */
 Action Timer_DrawReady(Handle timer)
 {
 	if (g_GameState != GameState_WaitingForPlayers)
@@ -332,7 +357,6 @@ Action Timer_DrawReady(Handle timer)
 		return Plugin_Stop;
 	}
 
-	char text[512];
 	char ready[512];
 	char unready[512];
 
@@ -357,8 +381,6 @@ Action Timer_DrawReady(Handle timer)
 		}
 	}
 
-	Format(text, sizeof(text), "Ready\n=====\n%s\n\nUnready\n=======\n%s", ready, unready);
-
 	for (int i = 1; i <= MaxClients; i++)
 	{
 		if (IsValidClient(i) && !IsFakeClient(i))
@@ -374,6 +396,10 @@ Action Timer_DrawReady(Handle timer)
 	return Plugin_Continue;
 }
 
+/**
+ * Repeated timer to check if two captains have been chosen
+ * and if so, begin the picking routine.
+ */
 Action Timer_CheckCaptains(Handle timer)
 {
 	if (g_GameState != GameState_CaptainDecision)
