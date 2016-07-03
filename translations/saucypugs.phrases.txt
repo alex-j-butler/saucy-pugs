@@ -1,0 +1,49 @@
+"Phrases"
+{
+	"PugSettingsNotSet"
+	{
+		"en"		"Game type and medic method must be set."
+	}
+
+	"PugAlreadyStarted"
+	{
+		"en"		"The pug has already been started."
+	}
+
+	"PugSetup"
+	{
+		"en"		"The pug was successfully setup."
+	}
+
+	"Command_Mode_Usage"
+	{
+		"en"		"Usage: !mode <4v4 | 6v6 | 9v9>"
+	}
+
+	"Command_MedicMode_Usage"
+	{
+		"en"		"Usage: !medic <captain | spectate>"
+	}
+
+	"Command_Mode_AlreadyStarted"
+	{
+		"en"		"The pug has already started."
+	}
+
+	"Command_Mode_SetMode"
+	{
+		"#format"	"{1:s},{2:s}"
+		"en"		"The pug {2} has been set to {1}."
+	}
+
+	"Command_Ready_Unable"
+	{
+		"en"		"The pug has not been setup, or has already started."
+	}
+
+	"Command_Ready_Set"
+	{
+		"#format"	"{1:s}"
+		"en"		"You are {1}."
+	}
+}

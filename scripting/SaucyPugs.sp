@@ -40,6 +40,9 @@ GameState g_GameState = GameState_Idle;
 GameType g_GameType = GameType_Undecided;
 CaptainDecisionMethod g_CaptainMethod = CaptainMethod_Undecided;
 
+Handle g_hHudSyncReady;
+Handle g_hHudSyncUnready;
+
 
 public Plugin myinfo = 
 {
@@ -55,9 +58,11 @@ public Plugin myinfo =
  **/
 public void OnPluginStart()
 {
+	LoadTranslations("saucypugs.phrases");
+
 	AddCommand("setup", Command_Setup, "Sets up the pug");
 	AddCommand("mode", Command_Mode, "Sets the game mode (4v4, 6v6 or 9v9)");
-	// AddCommand("medic", Command_MedicMode, "Sets the medic decision mode (captain or spectate call)");
+	AddCommand("medic", Command_MedicMode, "Sets the medic decision mode (captain or spectate call)");
 	AddCommand("ready", Command_Ready, "Marks yourself as ready");
 	AddCommand("unready", Command_Unready, "Marks yourself as unready");
 	// AddCommand("captain", Command_Captain, "Selects yourself as a team captain");
@@ -67,6 +72,9 @@ public void OnPluginStart()
 	g_hOnUnready = CreateGlobalForward("SaucyPugs_OnUnready", ET_Ignore, Param_Cell);
 	g_hOnPugReady = CreateGlobalForward("SaucyPugs_OnPugReady", ET_Ignore);
 	g_hOnPugStart = CreateGlobalForward("SaucyPugs_OnPugStart", ET_Ignore);
+
+	g_hHudSyncReady = CreateHudSynchronizer();
+	g_hHudSyncUnready = CreateHudSynchronizer();
 }
 
 /**
@@ -99,9 +107,10 @@ Action Command_Setup(int client, int args)
 	{
 		if (g_GameState == GameState_Idle)
 		{
-			// Set state amd start the player check timer.
+			// Set state and start the player check timer.
 			g_GameState = GameState_WaitingForPlayers;
 			CreateTimer(1.0, Timer_CheckPugReady, _, TIMER_REPEAT);
+			CreateTimer(1.0, Timer_DrawReady, _, TIMER_REPEAT);
 
 			// Reply with the 'PugSetup' translation,
 			// indicating that the pug has successfully been started.
@@ -144,13 +153,69 @@ Action Command_Mode(int client, int args)
 		GetCmdArg(1, type, sizeof(type));
 
 		// Set the game type.
-		g_GameType = GameTypeFromString(type);
+		GameType gameType = GameTypeFromString(type);
 
-		// Lowercase the string argument and
-		// print it out.
-		char lowercase[10];
-		ToLowerCase(type, lowercase, sizeof(lowercase));
-		ReplyToCommand(client, "%T", "Command_Mode_SetMode", client, lowercase);
+		CaptainDecisionMethod method = CaptainMethodFromString(type);
+		if (gameType != GameType_Undecided)
+		{
+			g_GameType = gameType;
+
+			// Lowercase the string argument and
+			// print it out.
+			char lowercase[10];
+			ToLowerCase(type, lowercase, sizeof(lowercase));
+			ReplyToCommand(client, "%T", "Command_Mode_SetMode", client, lowercase, "mode");
+		}
+		else
+		{
+			ReplyToCommand(client, "%T", "Command_Mode_Usage", client);
+
+			return Plugin_Handled;
+		}
+
+		return Plugin_Handled;
+	}
+	else
+	{
+		ReplyToCommand(client, "%T", "Command_Mode_AlreadyStarted", client);
+
+		return Plugin_Handled;
+	}
+}
+
+Action Command_MedicMode(int client, int args)
+{
+	if (args < 1)
+	{
+		ReplyToCommand(client, "%T", "Command_MedicMode_Usage", client);
+
+		return Plugin_Handled;
+	}
+
+	if (g_GameState == GameState_Idle || g_GameState == GameState_WaitingForPlayers)
+	{
+		// Get the first argument.
+		char type[50];
+		GetCmdArg(1, type, sizeof(type));
+
+		// Set the medic mode.
+		CaptainDecisionMethod method = CaptainMethodFromString(type);
+		if (method != CaptainMethod_Undecided)
+		{
+			g_CaptainMethod = method;
+
+			// Lowercase the string argument and
+			// print it out.
+			char lowercase[10];
+			ToLowerCase(type, lowercase, sizeof(lowercase));
+			ReplyToCommand(client, "%T", "Command_Mode_SetMode", client, lowercase, "medic mode");
+		}
+		else
+		{
+			ReplyToCommand(client, "%T", "Command_MedicMode_Usage", client);
+
+			return Plugin_Handled;
+		}
 
 		return Plugin_Handled;
 	}
@@ -164,6 +229,13 @@ Action Command_Mode(int client, int args)
 
 Action Command_Ready(int client, int args)
 {
+	if (g_GameState != GameState_WaitingForPlayers)
+	{
+		ReplyToCommand(client, "%T", "Command_Ready_Unable", client);
+
+		return Plugin_Handled;
+	}
+
 	if (IsValidClient(client) && !IsFakeClient(client))
 	{
 		g_PlayerReady[client] = true;
@@ -171,6 +243,10 @@ Action Command_Ready(int client, int args)
 		Call_StartForward(g_hOnReady)
 		Call_PushCell(client);
 		Call_Finish();
+
+		ReplyToCommand(client, "%T", "Command_Ready_Set", client, "ready");
+
+		return Plugin_Handled;
 	}
 	else
 	{
@@ -182,6 +258,13 @@ Action Command_Ready(int client, int args)
 
 Action Command_Unready(int client, int args)
 {
+	if (g_GameState != GameState_WaitingForPlayers)
+	{
+		ReplyToCommand(client, "%T", "Command_Ready_Unable", client);
+
+		return Plugin_Handled;
+	}
+
 	if (IsValidClient(client) && !IsFakeClient(client))
 	{
 		g_PlayerReady[client] = false;
@@ -189,6 +272,10 @@ Action Command_Unready(int client, int args)
 		Call_StartForward(g_hOnUnready);
 		Call_PushCell(client);
 		Call_Finish();
+
+		ReplyToCommand(client, "%T", "Command_Ready_Set", client, "unready");
+
+		return Plugin_Handled;
 	}
 	else
 	{
@@ -225,13 +312,78 @@ Action Timer_CheckPugReady(Handle timer)
 			// We can begin the captain selection.
 			if (g_CaptainMethod == CaptainMethod_CaptainPick)
 			{
-				// Start a timer for every 1 second, checking if two people have typed .captain.
+				// Start a timer for every 5 second, checking if two people have typed .captain.
 				// TODO
+				CreateTimer(5.0, Timer_CheckCaptains, _, TIMER_REPEAT);
 			}
 
 			// End this timer.
 			return Plugin_Stop;
 		}
+	}
+
+	return Plugin_Continue;
+}
+
+Action Timer_DrawReady(Handle timer)
+{
+	if (g_GameState != GameState_WaitingForPlayers)
+	{
+		return Plugin_Stop;
+	}
+
+	char text[512];
+	char ready[512];
+	char unready[512];
+
+	Format(ready, sizeof(ready), "Ready\n=====");
+	Format(unready, sizeof(unready), "Unready\n=======");
+
+	for (int i = 1; i <= MaxClients; i++)
+	{
+		if (IsValidClient(i) && !IsFakeClient(i))
+		{
+			char clientName[64];
+			GetClientName(i, clientName, sizeof(clientName));
+
+			if (g_PlayerReady[i] == true)
+			{
+				Format(ready, sizeof(ready), "%s\n%s", ready, clientName);
+			}
+			else
+			{
+				Format(unready, sizeof(unready), "%s\n%s", unready, clientName);
+			}
+		}
+	}
+
+	Format(text, sizeof(text), "Ready\n=====\n%s\n\nUnready\n=======\n%s", ready, unready);
+
+	for (int i = 1; i <= MaxClients; i++)
+	{
+		if (IsValidClient(i) && !IsFakeClient(i))
+		{
+			SetHudTextParams(0.15, 0.1, 1.0, 0, 255, 0, 255);
+			ShowSyncHudText(i, g_hHudSyncReady, ready);
+
+			SetHudTextParams(0.35, 0.1, 1.0, 0, 255, 0, 255);
+			ShowSyncHudText(i, g_hHudSyncUnready, unready);
+		}
+	}
+
+	return Plugin_Continue;
+}
+
+Action Timer_CheckCaptains(Handle timer)
+{
+	if (g_GameState != GameState_CaptainDecision)
+	{
+		return Plugin_Stop;
+	}
+
+	if (IsValidClient(g_CaptainOne) && !IsFakeClient(g_CaptainOne) && IsValidClient(g_CaptainTwo) && !IsFakeClient(g_CaptainTwo))
+	{
+		return Plugin_Stop;
 	}
 
 	return Plugin_Continue;
@@ -293,12 +445,30 @@ GameType GameTypeFromString(const char[] str)
 	return GameType_Undecided;
 }
 
+CaptainDecisionMethod CaptainMethodFromString(const char[] str)
+{
+	char buffer[50];
+	ToLowerCase(str, buffer, sizeof(buffer));
+
+	if (strcmp(buffer, "captain") == 0)
+	{
+		return CaptainMethod_CaptainPick;
+	}
+
+	if (strcmp(buffer, "spectate") == 0)
+	{
+		return CaptainMethod_SpectateCall;
+	}
+
+	return CaptainMethod_Undecided;
+}
+
 void ToLowerCase(const char[] str, char[] buffer, int bufferSize)
 {
 	int n = 0;
 	while (str[n] != '\0' && n < (bufferSize - 1))
 	{
-		buffer[n] = CharToUpper(str[n]);
+		buffer[n] = CharToLower(str[n]);
 
 		n++;
 	}
