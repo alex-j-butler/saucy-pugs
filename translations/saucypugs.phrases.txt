@@ -1,5 +1,61 @@
 "Phrases"
 {
+	"Game & medic method must be set"
+	{
+		"en"		"Game type and medic method must be set."
+	}
+
+	"Pug has already been started"
+	{
+		"en"		"The pug has already been started."
+	}
+
+	"Pug has already started"
+	{
+		"en"		"The pug has already started."
+	}
+
+	"Pug successfully setup"
+	{
+		"en"		"The pug was successfully setup."
+	}
+
+	"Pug setting has been set"
+	{
+		"#format"	"{1:s},{2:s}"
+		"en"		"The pug {2} has been set to {1}."
+	}
+
+	"Unable to ready"
+	{
+		"en"		"The pug has not been setup, or has already started."
+	}
+
+	"Ready status set"
+	{
+		"#format"	"{1:s}"
+		"en"		"You are {1}."
+	}
+
+	"Captains already chosen"
+	{
+		"en"		"The captains have already been chosen."
+	}
+
+	"Mode command usage"
+	{
+		"en"		"Usage !mode <4v4 | 6v6 | 9v9>"
+	}
+
+	"MedicMode command usage"
+	{
+		"en"		"Usage: !medic <captain | spectate>"
+	}
+
+
+
+
+
 	"PugSettingsNotSet"
 	{
 		"en"		"Game type and medic method must be set."

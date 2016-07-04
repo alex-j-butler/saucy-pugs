@@ -25,6 +25,13 @@ enum CaptainDecisionMethod
 	CaptainMethod_SpectateCall,
 };
 
+enum Team
+{
+	Team_Undecided,
+	Team_One,
+	Team_Two,
+};
+
 /** Forwards **/
 Handle g_hOnReady = INVALID_HANDLE;
 Handle g_hOnUnready = INVALID_HANDLE;
@@ -35,10 +42,14 @@ Handle g_hOnPugStart = INVALID_HANDLE;
 int g_PlayersReady = 0;
 int g_CaptainOne = -1;
 int g_CaptainTwo = -1;
+int g_TeamOnePlayers = 0;
+int g_TeamTwoPlayers = 0;
 bool g_PlayerReady[MAXPLAYERS + 1];
+Team g_PlayerTeam[MAXPLAYERS + 1];
 GameState g_GameState = GameState_Idle;
 GameType g_GameType = GameType_Undecided;
 CaptainDecisionMethod g_CaptainMethod = CaptainMethod_Undecided;
+Team g_PickingTeam = Team_Undecided;
 
 Handle g_hHudSyncReady;
 Handle g_hHudSyncUnready;
@@ -65,7 +76,7 @@ public void OnPluginStart()
 	AddCommand("medic", Command_MedicMode, "Sets the medic decision mode (captain or spectate call)");
 	AddCommand("ready", Command_Ready, "Marks yourself as ready");
 	AddCommand("unready", Command_Unready, "Marks yourself as unready");
-	// AddCommand("captain", Command_Captain, "Selects yourself as a team captain");
+	AddCommand("captain", Command_Captain, "Selects yourself as a team captain");
 
 	// Create forwards.
 	g_hOnReady = CreateGlobalForward("SaucyPugs_OnReady", ET_Ignore, Param_Cell);
@@ -83,6 +94,16 @@ public void OnPluginStart()
 public bool OnClientConnect(int client, char[] rejectmsg, int maxlen)
 {
 	g_PlayerReady[client] = false;
+
+	if (g_CaptainOne == client)
+	{
+		g_CaptainOne = -1;
+	}
+	if (g_CaptainTwo == client)
+	{
+		g_CaptainTwo = -1;
+	}
+
 	return true;
 }
 
@@ -92,6 +113,15 @@ public bool OnClientConnect(int client, char[] rejectmsg, int maxlen)
 public void OnClientDisconnect_Post(int client)
 {
 	g_PlayerReady[client] = false;
+
+	if (g_CaptainOne == client)
+	{
+		g_CaptainOne = -1;
+	}
+	if (g_CaptainTwo == client)
+	{
+		g_CaptainTwo = -1;
+	}
 }
 
 /**
@@ -160,8 +190,6 @@ Action Command_Mode(int client, int args)
 
 		// Set the game type.
 		GameType gameType = GameTypeFromString(type);
-
-		CaptainDecisionMethod method = CaptainMethodFromString(type);
 		if (gameType != GameType_Undecided)
 		{
 			g_GameType = gameType;
@@ -300,6 +328,47 @@ Action Command_Unready(int client, int args)
 	return Plugin_Handled;
 }
 
+Action Command_Captain(int client, int args)
+{
+	if (g_GameState != GameState_CaptainDecision)
+	{
+		ReplyToCommand(client, "%T", "Unable to ready", client);
+
+		return Plugin_Handled;
+	}
+
+	if (IsValidClient(client) && !IsFakeClient(client))
+	{
+		if (g_CaptainOne == -1)
+		{
+			// Set captain one and print message.
+			g_CaptainOne = client;
+
+			ReplyToCommand(client, "%T", "Ready status set", client, "captain one");
+
+			return Plugin_Handled;
+		}
+		else if (g_CaptainTwo == -1)
+		{
+			// Set captain two and print message.
+			g_CaptainTwo = client;
+
+			ReplyToCommand(client, "%T", "Ready status set", client, "captain two");
+
+			return Plugin_Handled;
+		}
+		else
+		{
+			// Print already chosen message.
+			ReplyToCommand(client, "%T", "Captains already chosen", client);
+
+			return Plugin_Handled;
+		}
+	}
+
+	return Plugin_Handled;
+}
+
 /**
  * Add a client command.
  */
@@ -409,6 +478,28 @@ Action Timer_CheckCaptains(Handle timer)
 
 	if (IsValidClient(g_CaptainOne) && !IsFakeClient(g_CaptainOne) && IsValidClient(g_CaptainTwo) && !IsFakeClient(g_CaptainTwo))
 	{
+		// Begin picking.
+		g_GameState = GameState_PickingPlayers;
+
+		// Move everyone to spectator.
+		for (int i = 1; i <= MaxClients; i++)
+		{
+			if (IsValidClient(i) && !IsFakeClient(i))
+			{
+				if (i != g_CaptainOne && i != g_CaptainTwo)
+				{
+					// 1 = Spectator.
+					ChangeClientTeam(i, 1);
+				}
+			}
+		}
+
+		// Let captain one pick first.
+		g_PickingTeam = Team_One;
+
+		Menu menu = BuildPlayerMenu();
+		menu.Display(g_CaptainOne, MENU_TIME_FOREVER);
+
 		return Plugin_Stop;
 	}
 
@@ -508,6 +599,109 @@ void ToLowerCase(const char[] str, char[] buffer, int bufferSize)
 void SendAnnouncement()
 {
 	// TODO: Announcements.
+}
+
+Menu BuildPlayerMenu()
+{
+	Menu menu = new Menu(Menu_SelectPlayer);
+
+	for (int i = 1; i <= MaxClients; i++)
+	{
+		if (IsValidClient(i) && !IsFakeClient(i))
+		{
+			if (g_PlayerTeam[i] == Team_Undecided)
+			{
+				char playerName[32];
+				GetClientName(i, playerName, sizeof(playerName));
+
+				char clientId[10];
+				IntToString(i, clientId, sizeof(clientId));
+				menu.AddItem(clientId, playerName);
+			}
+		}
+	}
+
+	menu.SetTitle("Choose a player:");
+
+	return menu;
+}
+
+public int Menu_SelectPlayer(Menu menu, MenuAction action, int client, int param2)
+{
+	if (action == MenuAction_Select)
+	{
+		char playerName[32];
+		menu.GetItem(param2, playerName, sizeof(playerName));
+
+		// Announce the player chosen, and move the player to the right team.
+		if (g_CaptainOne == client)
+		{
+			// Move the chosen player to team one.
+			g_PlayerTeam[param2] = Team_One;
+			ChangeClientTeam(param2, 2);
+
+			g_TeamOnePlayers++;
+		}
+		else if (g_CaptainTwo == client)
+		{
+			// Move the chosen player to team two.
+			g_PlayerTeam[param2] = Team_Two;
+			ChangeClientTeam(param2, 3);
+
+			g_TeamTwoPlayers++;
+		}
+		else
+		{
+			return 1;
+		}
+
+		int requiredPlayers = GetRequiredPlayers();
+
+		if (g_PickingTeam == Team_One)
+		{
+			if (g_TeamTwoPlayers != requiredPlayers / 2)
+			{
+				g_PickingTeam = Team_Two;
+			}
+			else
+			{
+				g_PickingTeam = Team_One;
+			}
+		}
+		else if (g_PickingTeam == Team_Two)
+		{
+			if (g_TeamOnePlayers != requiredPlayers / 2)
+			{
+				g_PickingTeam = Team_One;
+			}
+			else
+			{
+				g_PickingTeam = Team_Two;
+			}
+		}
+
+		
+		if (g_TeamTwoPlayers == requiredPlayers / 2 && g_TeamOnePlayers == requiredPlayers / 2)
+		{
+			// Ready to starrrrrrt!
+		}
+		else
+		{
+			Menu newMenu = BuildPlayerMenu();
+
+			// Show the menu for the person to choose next.
+			if (g_PickingTeam == Team_One)
+			{
+				newMenu.Display(g_CaptainOne, MENU_TIME_FOREVER);
+			}
+			else if (g_PickingTeam == Team_Two)
+			{
+				newMenu.Display(g_CaptainTwo, MENU_TIME_FOREVER);
+			}
+		}
+	}
+
+	return 1;
 }
 
 bool IsValidClient(int client)
