@@ -1,0 +1,24 @@
+sudo: false
+
+addons:
+  apt_packages:
+    - lib32stdc++6
+
+env:
+  - SMVERSION=1.7
+  - SMVERSION=1.8
+
+matrix:
+  fast_finish: true
+
+install:
+  - wget http://sourcemod.net/smdrop/$SMVERSION/ -O - | grep "\.tar\.gz" | sed 's/^.*"sourcemod/sourcemod/;s/\.tar\.gz".*$/.tar.gz/' | tail --lines=1 > sourcemod
+  - wget --input-file=sourcemod --base=http://sourcemod.net/smdrop/$SMVERSION/
+  - tar -xzf $(cat sourcemod)
+
+before_script:
+  - cd addons/sourcemod/scripting
+  - chmod +x spcomp
+  - mkdir compiled
+
+script: ./compile.sh SaucyPugs.sp
