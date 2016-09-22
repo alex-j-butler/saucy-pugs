@@ -1,12 +1,14 @@
 #include <sourcemod>
 
+#define RED 0
+#define BLU 1
+#define TEAM_OFFSET 2
+
 enum GameState
 {
 	GameState_Idle,
 	GameState_WaitingForPlayers,
-	GameState_CaptainDecision,
-	GameState_PickingPlayers,
-	GameState_Ready,
+	GameState_WaitingForTeamReady,
 	GameState_Playing,
 };
 
@@ -17,13 +19,6 @@ enum GameType
 	GameType_Sixes,
 	GameType_HL,
 }
-
-enum CaptainDecisionMethod
-{
-	CaptainMethod_Undecided,
-	CaptainMethod_CaptainPick,
-	CaptainMethod_SpectateCall,
-};
 
 enum Team
 {
@@ -42,26 +37,26 @@ Handle g_hOnPugStart = INVALID_HANDLE;
 int g_PlayersReady = 0;
 int g_CaptainOne = -1;
 int g_CaptainTwo = -1;
-int g_TeamOnePlayers = 0;
-int g_TeamTwoPlayers = 0;
 bool g_PlayerReady[MAXPLAYERS + 1];
-Team g_PlayerTeam[MAXPLAYERS + 1];
+bool g_TeamReady[2] = { false, false };
 GameState g_GameState = GameState_Idle;
 GameType g_GameType = GameType_Undecided;
-CaptainDecisionMethod g_CaptainMethod = CaptainMethod_Undecided;
-Team g_PickingTeam = Team_Undecided;
 
 Handle g_hHudSyncReady;
 Handle g_hHudSyncUnready;
+Handle g_hHudSyncCountdown;
 
+Handle g_hDrawHUDTimer;
+
+ConVar g_cTournament;
 
 public Plugin myinfo = 
 {
-	name = "Saucy Pugs (fucking kill me)",
+	name = "Saucy Pugs",
 	author = "Alex",
 	description = "SourceMod plugin for pugs.",
-	version = "1.0",
-	url = "http://rnndm.xyz/saucy_pugs"
+	version = "1.1",
+	url = ""
 };
 
 /**
@@ -72,11 +67,8 @@ public void OnPluginStart()
 	LoadTranslations("saucypugs.phrases");
 
 	AddCommand("setup", Command_Setup, "Sets up the pug");
-	AddCommand("mode", Command_Mode, "Sets the game mode (4v4, 6v6 or 9v9)");
-	AddCommand("medic", Command_MedicMode, "Sets the medic decision mode (captain or spectate call)");
 	AddCommand("ready", Command_Ready, "Marks yourself as ready");
 	AddCommand("unready", Command_Unready, "Marks yourself as unready");
-	AddCommand("captain", Command_Captain, "Selects yourself as a team captain");
 
 	// Create forwards.
 	g_hOnReady = CreateGlobalForward("SaucyPugs_OnReady", ET_Ignore, Param_Cell);
@@ -86,6 +78,49 @@ public void OnPluginStart()
 
 	g_hHudSyncReady = CreateHudSynchronizer();
 	g_hHudSyncUnready = CreateHudSynchronizer();
+	g_hHudSyncCountdown = CreateHudSynchronizer();
+
+	// Hook events.
+	HookEvent("tournament_stateupdate", Event_TournamentStateUpdate);
+	HookEvent("teamplay_game_over", Event_GameOver);
+	HookEvent("tf_game_over", Event_GameOver);
+
+	g_cTournament = FindConVar("mp_tournament");
+}
+
+public void Event_TournamentStateUpdate(Event event, const char[] name, bool dontBroadcast)
+{
+	int team = GetClientTeam(GetEventInt(event, "userid")) - TEAM_OFFSET;
+	bool nameChange = GetEventBool(event, "namechange");
+	bool readyState = GetEventBool(event, "readystate");
+
+	if (!nameChange && g_GameState == GameState_WaitingForTeamReady)
+	{
+		g_TeamReady[team] = readyState;
+
+		if (g_TeamReady[RED] && g_TeamReady[BLU])
+		{
+			g_GameState = GameState_Playing;
+		}
+		else
+		{
+			g_GameState = GameState_WaitingForTeamReady;
+		}
+	}
+}
+
+public Event_GameOver(Event event, const char[] name, bool dontBroadcast)
+{
+	g_TeamReady[RED] = false;
+	g_TeamReady[BLU] = false;
+	g_GameState = GameState_Idle;
+}
+
+public void OnMapStart()
+{
+	g_TeamReady[RED] = false;
+	g_TeamReady[BLU] = false;
+	g_GameState = GameState_Idle;
 }
 
 /**
@@ -136,132 +171,11 @@ Action Command_Setup(int client, int args)
 		return Plugin_Handled;
 	}
 
-	if (g_GameType != GameType_Undecided && g_CaptainMethod != CaptainMethod_Undecided)
-	{
-		if (g_GameState == GameState_Idle)
-		{
-			// Set state and start the player check timer.
-			g_GameState = GameState_WaitingForPlayers;
-			CreateTimer(1.0, Timer_CheckPugReady, _, TIMER_REPEAT);
-			CreateTimer(1.0, Timer_DrawReady, _, TIMER_REPEAT);
+	// Display the mode selection dialog to the client.
+	Menu menu = BuildModeMenu();
+	menu.Display(client, MENU_TIME_FOREVER);
 
-			// Reply with the 'PugSetup' translation,
-			// indicating that the pug has successfully been started.
-			ReplyToCommand(client, "%T", "PugSetup", client);
-
-			return Plugin_Handled;
-		}
-		else
-		{
-			// Reply with the 'PugAlreadyStarted' translation,
-			// indicating that the pug has already been started.
-			ReplyToCommand(client, "%T", "PugAlreadyStarted", client);
-
-			return Plugin_Handled;
-		}
-	}
-	else
-	{
-		// Reply with the 'PugSettingsNotSet' translation,
-		// indicating that the gametype and medic mode is not set.
-		ReplyToCommand(client, "%T", "PugSettingsNotSet", client);
-
-		return Plugin_Handled;
-	}
-}
-
-/**
- * Command to set the game mode.
- */
-Action Command_Mode(int client, int args)
-{
-	if (args < 1)
-	{
-		ReplyToCommand(client, "%T", "Command_Mode_Usage", client);
-
-		return Plugin_Handled;
-	}
-
-	if (g_GameState == GameState_Idle || g_GameState == GameState_WaitingForPlayers)
-	{
-		// Get the first argument.
-		char type[10];
-		GetCmdArg(1, type, sizeof(type));
-
-		// Set the game type.
-		GameType gameType = GameTypeFromString(type);
-		if (gameType != GameType_Undecided)
-		{
-			g_GameType = gameType;
-
-			// Lowercase the string argument and
-			// print it out.
-			char lowercase[10];
-			ToLowerCase(type, lowercase, sizeof(lowercase));
-			ReplyToCommand(client, "%T", "Command_Mode_SetMode", client, lowercase, "mode");
-		}
-		else
-		{
-			ReplyToCommand(client, "%T", "Command_Mode_Usage", client);
-
-			return Plugin_Handled;
-		}
-
-		return Plugin_Handled;
-	}
-	else
-	{
-		ReplyToCommand(client, "%T", "Command_Mode_AlreadyStarted", client);
-
-		return Plugin_Handled;
-	}
-}
-
-/**
- * Command to set the medic decision mode.
- */
-Action Command_MedicMode(int client, int args)
-{
-	if (args < 1)
-	{
-		ReplyToCommand(client, "%T", "Command_MedicMode_Usage", client);
-
-		return Plugin_Handled;
-	}
-
-	if (g_GameState == GameState_Idle || g_GameState == GameState_WaitingForPlayers)
-	{
-		// Get the first argument.
-		char type[50];
-		GetCmdArg(1, type, sizeof(type));
-
-		// Set the medic mode.
-		CaptainDecisionMethod method = CaptainMethodFromString(type);
-		if (method != CaptainMethod_Undecided)
-		{
-			g_CaptainMethod = method;
-
-			// Lowercase the string argument and
-			// print it out.
-			char lowercase[10];
-			ToLowerCase(type, lowercase, sizeof(lowercase));
-			ReplyToCommand(client, "%T", "Command_Mode_SetMode", client, lowercase, "medic mode");
-		}
-		else
-		{
-			ReplyToCommand(client, "%T", "Command_MedicMode_Usage", client);
-
-			return Plugin_Handled;
-		}
-
-		return Plugin_Handled;
-	}
-	else
-	{
-		ReplyToCommand(client, "%T", "Command_Mode_AlreadyStarted", client);
-
-		return Plugin_Handled;
-	}
+	return Plugin_Handled;
 }
 
 /**
@@ -328,47 +242,6 @@ Action Command_Unready(int client, int args)
 	return Plugin_Handled;
 }
 
-Action Command_Captain(int client, int args)
-{
-	if (g_GameState != GameState_CaptainDecision)
-	{
-		ReplyToCommand(client, "%T", "Unable to ready", client);
-
-		return Plugin_Handled;
-	}
-
-	if (IsValidClient(client) && !IsFakeClient(client))
-	{
-		if (g_CaptainOne == -1)
-		{
-			// Set captain one and print message.
-			g_CaptainOne = client;
-
-			ReplyToCommand(client, "%T", "Ready status set", client, "captain one");
-
-			return Plugin_Handled;
-		}
-		else if (g_CaptainTwo == -1)
-		{
-			// Set captain two and print message.
-			g_CaptainTwo = client;
-
-			ReplyToCommand(client, "%T", "Ready status set", client, "captain two");
-
-			return Plugin_Handled;
-		}
-		else
-		{
-			// Print already chosen message.
-			ReplyToCommand(client, "%T", "Captains already chosen", client);
-
-			return Plugin_Handled;
-		}
-	}
-
-	return Plugin_Handled;
-}
-
 /**
  * Add a client command.
  */
@@ -394,18 +267,12 @@ Action Timer_CheckPugReady(Handle timer)
 		}
 	}
 
-	// Make sure the plugin is setup with a gametype, captain method, and that the game is idle.
-	if (g_GameState == GameState_Idle && g_GameType != GameType_Undecided && g_CaptainMethod != CaptainMethod_Undecided)
+	// Make sure the plugin is setup with a gametype and that the game is idle.
+	if (g_GameState == GameState_Idle && g_GameType != GameType_Undecided)
 	{
 		if (g_PlayersReady >= GetRequiredPlayers())
 		{
-			// We can begin the captain selection.
-			if (g_CaptainMethod == CaptainMethod_CaptainPick)
-			{
-				// Start a timer for every 5 second, checking if two people have typed .captain.
-				// TODO
-				CreateTimer(5.0, Timer_CheckCaptains, _, TIMER_REPEAT);
-			}
+			CreateTimer(2.0, Timer_SpecWarn);
 
 			// End this timer.
 			return Plugin_Stop;
@@ -413,6 +280,32 @@ Action Timer_CheckPugReady(Handle timer)
 	}
 
 	return Plugin_Continue;
+}
+
+// Run the spectator warning.
+Action Timer_SpecWarn(Handle timer)
+{
+	// Draw warning.
+	PrintCenterTextAll("WARN");
+
+	// Start the spec call timer with a random time
+	float time = GetRandomFloat(4.0, 9.0);
+	CreateTimer(time, Timer_SpecCall);
+}
+
+// Run the spectator call.
+// and set tournament mode on
+// and stop the ready hud.
+Action Timer_SpecCall(Handle timer)
+{
+	// Draw spec call.
+	PrintCenterTextAll("SPEC");
+
+	// Set tournament mode on.
+	g_cTournament.SetBool(1);
+
+	// Stop the draw timer.
+	KillTimer(g_hDrawHUDTimer);
 }
 
 /**
@@ -471,34 +364,10 @@ Action Timer_DrawReady(Handle timer)
  */
 Action Timer_CheckCaptains(Handle timer)
 {
-	if (g_GameState != GameState_CaptainDecision)
-	{
-		return Plugin_Stop;
-	}
-
 	if (IsValidClient(g_CaptainOne) && !IsFakeClient(g_CaptainOne) && IsValidClient(g_CaptainTwo) && !IsFakeClient(g_CaptainTwo))
 	{
 		// Begin picking.
 		g_GameState = GameState_PickingPlayers;
-
-		// Move everyone to spectator.
-		for (int i = 1; i <= MaxClients; i++)
-		{
-			if (IsValidClient(i) && !IsFakeClient(i))
-			{
-				if (i != g_CaptainOne && i != g_CaptainTwo)
-				{
-					// 1 = Spectator.
-					ChangeClientTeam(i, 1);
-				}
-			}
-		}
-
-		// Let captain one pick first.
-		g_PickingTeam = Team_One;
-
-		Menu menu = BuildPlayerMenu();
-		menu.Display(g_CaptainOne, MENU_TIME_FOREVER);
 
 		return Plugin_Stop;
 	}
@@ -562,24 +431,6 @@ GameType GameTypeFromString(const char[] str)
 	return GameType_Undecided;
 }
 
-CaptainDecisionMethod CaptainMethodFromString(const char[] str)
-{
-	char buffer[50];
-	ToLowerCase(str, buffer, sizeof(buffer));
-
-	if (strcmp(buffer, "captain") == 0)
-	{
-		return CaptainMethod_CaptainPick;
-	}
-
-	if (strcmp(buffer, "spectate") == 0)
-	{
-		return CaptainMethod_SpectateCall;
-	}
-
-	return CaptainMethod_Undecided;
-}
-
 void ToLowerCase(const char[] str, char[] buffer, int bufferSize)
 {
 	int n = 0;
@@ -601,107 +452,70 @@ void SendAnnouncement()
 	// TODO: Announcements.
 }
 
-Menu BuildPlayerMenu()
+Menu BuildModeMenu()
 {
-	Menu menu = new Menu(Menu_SelectPlayer);
+	Menu menu = new Menu(Menu_SelectMode);
 
-	for (int i = 1; i <= MaxClients; i++)
-	{
-		if (IsValidClient(i) && !IsFakeClient(i))
-		{
-			if (g_PlayerTeam[i] == Team_Undecided)
-			{
-				char playerName[32];
-				GetClientName(i, playerName, sizeof(playerName));
+	menu.AddItem("4v4", "4v4");
+	menu.AddItem("6v6", "6v6");
+	menu.AddItem("9v9", "Highlander");
 
-				char clientId[10];
-				IntToString(i, clientId, sizeof(clientId));
-				menu.AddItem(clientId, playerName);
-			}
-		}
-	}
-
-	menu.SetTitle("Choose a player:");
+	menu.SetTitle("Choose a game type:");
 
 	return menu;
 }
 
-public int Menu_SelectPlayer(Menu menu, MenuAction action, int client, int param2)
+public int Menu_SelectMode(Menu menu, MenuAction action, int client, int param2)
 {
 	if (action == MenuAction_Select)
 	{
-		char playerName[32];
-		menu.GetItem(param2, playerName, sizeof(playerName));
+		char type[10];
+		bool found = menu.GetItem(param2, type, sizeof(type));
 
-		// Announce the player chosen, and move the player to the right team.
-		if (g_CaptainOne == client)
+		g_GameType = GameTypeFromString(type);
+
+		if (g_GameType != GameType_Undecided)
 		{
-			// Move the chosen player to team one.
-			g_PlayerTeam[param2] = Team_One;
-			ChangeClientTeam(param2, 2);
-
-			g_TeamOnePlayers++;
-		}
-		else if (g_CaptainTwo == client)
-		{
-			// Move the chosen player to team two.
-			g_PlayerTeam[param2] = Team_Two;
-			ChangeClientTeam(param2, 3);
-
-			g_TeamTwoPlayers++;
-		}
-		else
-		{
-			return 1;
-		}
-
-		int requiredPlayers = GetRequiredPlayers();
-
-		if (g_PickingTeam == Team_One)
-		{
-			if (g_TeamTwoPlayers != requiredPlayers / 2)
+			if (g_GameState == GameState_Idle)
 			{
-				g_PickingTeam = Team_Two;
+				// Set state and start the player check timer.
+				g_GameState = GameState_WaitingForPlayers;
+				CreateTimer(1.0, Timer_CheckPugReady, _, TIMER_REPEAT);
+				g_hDrawHUDTimer = CreateTimer(1.0, Timer_DrawReady, _, TIMER_REPEAT);
+
+				// Reply with the 'PugSetup' translation,
+				// indicating that the pug has successfully been started.
+				ReplyToCommand(client, "%T", "PugSetup", client);
+
+				// Set tournament mode.
+				g_cTournament.SetBool(0);
+
+				return Plugin_Handled;
 			}
 			else
 			{
-				g_PickingTeam = Team_One;
-			}
-		}
-		else if (g_PickingTeam == Team_Two)
-		{
-			if (g_TeamOnePlayers != requiredPlayers / 2)
-			{
-				g_PickingTeam = Team_One;
-			}
-			else
-			{
-				g_PickingTeam = Team_Two;
-			}
-		}
+				// Reply with the 'PugAlreadyStarted' translation,
+				// indicating that the pug has already been started.
+				ReplyToCommand(client, "%T", "PugAlreadyStarted", client);
 
-		
-		if (g_TeamTwoPlayers == requiredPlayers / 2 && g_TeamOnePlayers == requiredPlayers / 2)
-		{
-			// Ready to starrrrrrt!
+				return Plugin_Handled;
+			}
 		}
 		else
 		{
-			Menu newMenu = BuildPlayerMenu();
+			// Reply with the 'PugSettingsNotSet' translation,
+			// indicating that the gametype and medic mode is not set.
+			ReplyToCommand(client, "%T", "PugSettingsNotSet", client);
 
-			// Show the menu for the person to choose next.
-			if (g_PickingTeam == Team_One)
-			{
-				newMenu.Display(g_CaptainOne, MENU_TIME_FOREVER);
-			}
-			else if (g_PickingTeam == Team_Two)
-			{
-				newMenu.Display(g_CaptainTwo, MENU_TIME_FOREVER);
-			}
+			return Plugin_Handled;
 		}
 	}
+	else if (action == MenuAction_End)
+	{
+		delete menu;
+	}
 
-	return 1;
+	return Plugin_Handled;
 }
 
 bool IsValidClient(int client)
