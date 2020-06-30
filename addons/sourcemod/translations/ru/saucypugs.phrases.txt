@@ -1,0 +1,105 @@
+"Phrases"
+{
+	"Game & medic method must be set"
+	{
+		"ru"		"Тип игры и метод медика должны быть установлены."
+	}
+
+	"Pug has already been started"
+	{
+		"ru"		"Pug уже запущен."
+	}
+
+	"Pug has already started"
+	{
+		"ru"		"Pug уже начался."
+	}
+
+	"Pug successfully setup"
+	{
+		"ru"		"Pug был успешно настроен."
+	}
+
+	"Pug setting has been set"
+	{
+		"#format"	"{1:s},{2:s}"
+		"ru"		"Pug {2} был установлен на {1}."
+	}
+
+	"Unable to ready"
+	{
+		"ru"		"Pug не был настроен или уже запущен."
+	}
+
+	"Ready status set"
+	{
+		"#format"	"{1:s}"
+		"ru"		"Вы {1}."
+	}
+
+	"Captains already chosen"
+	{
+		"ru"		"Капитаны уже выбраны."
+	}
+
+	"Mode command usage"
+	{
+		"ru"		"Использование !mode <4v4 | 6v6 | 9v9>"
+	}
+
+	"MedicMode command usage"
+	{
+		"ru"		"Использование: !medic <captain | spectate>"
+	}
+
+
+
+
+
+	"PugSettingsNotSet"
+	{
+		"ru"		"Game type and medic method must be set."
+	}
+
+	"PugAlreadyStarted"
+	{
+		"ru"		"The pug has already been started."
+	}
+
+	"PugSetup"
+	{
+		"ru"		"The pug was successfully setup."
+	}
+
+	"Command_Mode_Usage"
+	{
+		"ru"		"Usage: !mode <4v4 | 6v6 | 9v9>"
+	}
+
+	"Command_MedicMode_Usage"
+	{
+		"ru"		"Usage: !medic <captain | spectate>"
+	}
+
+	"Command_Mode_AlreadyStarted"
+	{
+		"ru"		"The pug has already started."
+	}
+
+	"Command_Mode_SetMode"
+	{
+		"#format"	"{1:s},{2:s}"
+		"ru"		"The pug {2} has been set to {1}."
+	}
+
+	"Command_Ready_Unable"
+	{
+		"ru"		"The pug has not been setup, or has already started."
+	}
+
+	"Command_Ready_Set"
+	{
+		"#format"	"{1:s}"
+		"ru"		"You are {1}."
+	}
+}
